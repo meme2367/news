@@ -1,16 +1,28 @@
 
 import os
 import sys
-import urllib.request
+from urllib.request import urlopen
 import json
 import xlsxwriter
 import pandas as pd
 from bs4 import BeautifulSoup
+import csv
+import requests
+import urllib.request
+import time
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 '''
 $ tail -n 1 $HOME/.bash_profile
 export PATH="$HOME/miniconda3/bin:$PATH"
 $ source $HOME/.bash_profile
-
+#
+#chrome version 74.0.3729.131(64비트)
+# chrome driver version 74.0.3729.6
+# 
+#
+#
+#
 #1 base
 #2 news_venv
 #
@@ -24,7 +36,20 @@ $ source $HOME/.bash_profile
 
 
 '''
-def news(query, start=1,display=100,sort='date'):
+
+def remove_space(my_content):
+	result = ""
+	for i in my_content.splitlines():
+		if i.strip() == "":
+			pass
+		else:
+			x = " ".join(i.split())
+			result += x
+			result += "\n"
+	return result
+
+
+def news(query, start=1,display=50,sort='date'):
 	client_id = "9wcMaQNSaihKmYkZwR0d"
 	client_secret = "O5XwiLjhif"
 	if sort not in ['sim','date']:
@@ -38,7 +63,6 @@ def news(query, start=1,display=100,sort='date'):
 	rescode = response.getcode()
 	if(rescode==200):
 		response_body = response.read()
-		print(response_body.decode('utf-8'))
 		return response_body
 	else:
 		print("Error Code:" + rescode)
@@ -47,6 +71,58 @@ def news(query, start=1,display=100,sort='date'):
 def remove_html_tag(string):
 	a = BeautifulSoup(string, 'html.parser')
 	return a.get_text()
+
+
+def run_csv(keyword):
+	with open("naver_news_%s.csv" % keyword, 'w' , encoding='utf-8') as csvoutput:
+		csv_writer = csv.writer(csvoutput)
+		for start_i in range(1, 4):
+			tmp = news(keyword, start_i)
+			json_res = json.loads(tmp, encoding='utf-8')
+			for items in json_res['items']:
+				ra = []
+				ra.append(remove_html_tag(items['title']))
+				ra.append(items['link'])
+				ra.append(items['originallink'])
+				ra.append(remove_html_tag(items['description']))
+				ra.append(items['pubDate'])
+				csv_writer.writerow(ra)
+
+
+DRIVER = None
+def get_description(url):
+	global DRIVER
+	if DRIVER == None:
+		DRIVER = webdriver.Chrome(executable_path='./chromedriver')	
+
+
+	DRIVER.get(url)
+	time.sleep(2)
+	html = DRIVER.page_source
+	current_url = DRIVER.current_url
+	bs = BeautifulSoup(html, "html.parser")
+	
+	
+	if current_url.find("entertain.naver.com") >= 0:
+		find_id = "articeBody"
+	elif current_url.find("news.naver.com") >= 0:
+		find_id = "articleBodyContents"
+	elif current_url.find("topstarnews.net") >=0:
+		find_id = "adnmore_inImage"
+	else:
+		find_id = "none"
+	#ententain용 contents2=soup.find_all("div", {"id":"articeBody"})for item in main_result:
+	main_result = bs.find(id=find_id)
+
+	if main_result != None:
+		for script in main_result.find_all('script'):
+			script.decompose()
+		content = main_result.get_text("\n")
+		content = remove_space(content)
+		
+	
+	return content
+
 
 
 def run_search(keyword):
@@ -63,25 +139,27 @@ def run_search(keyword):
 		json_res = json.loads(tmp,encoding='utf-8')
 
 		for items in json_res['items']:	
+			#print("\n*******************************************\n")
+			#print(items)
 			title.append(remove_html_tag(items['title']))
 			link.append(items['link'])
 			originallink.append(items['originallink'])
-			description.append(remove_html_tag(items['description']))
+			#description.append(remove_html_tag(items['description']))
+			
 			pubDate.append(items['pubDate'])
-			if items['originallink'].find('news.chosun.com') >= 0:
-				company.append('조선일보')
-			elif items['originallink'].find('edaily.co.kr') >= 0:
-				company.append('이데일리')
-			elif items['originallink'].find('hankyung.com') >= 0:
-				company.append('한경')
+			if items["link"].find("news.naver.com") >= 0:
+				description.append(get_description(items["link"]))
 			else:
-				company.append(' ')
+				description.append('')
+				pass
+
 			
-			
-	d = {'Title' : title,'Company':company,'pubDate':pubDate,'Description':description,'Link':link,'OriginalLink':originallink}
+	d = {'Title' : title,'pubDate':pubDate,'Description':description,'Link':link,'OriginalLink':originallink}
 	df = pd.DataFrame(d)
 	df.to_excel(writer,'Sheet1')
 	writer.save()
+
+
 
 '''
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -90,6 +168,11 @@ def schedule(keyword):
 	# 예약방식 interval로 설정, 1시간마다 한번 실행
 	sched.add_job(run_search(keyword), 'interval', seconds=3600)
 	sched.start()
+
 '''
 #schedule("버닝썬")
+
+
+
 run_search("버닝썬")
+
